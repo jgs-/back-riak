@@ -28,7 +28,22 @@ entry2json(Slapi_Entry *e)
 int 
 riak_back_init(Slapi_PBlock *pb)
 {
-	
+	if (slapi_pblock_set(pb, SLAPI_PLUGIN_DB_BIND_FN, (void *)riak_back_bind) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_UNBIND_FN, (void *)riak_back_unbind) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_SEARCH_FN, (void *)riak_back_search) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_COMPARE_FN, (void *)riak_back_compare) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_MODIFY_FN, (void *)riak_back_modify) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_MODRDN_FN, (void *)riak_back_modrdn) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_ADD_FN, (void *)riak_back_add) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_DELETE_FN, (void *)riak_back_delete) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_CONFIG_FN, (void *)riak_back_config) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_CLOSE_FN, (void *)riak_back_close) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_FLUSH_FN, (void *)riak_back_flush) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_START_FN, (void *)riak_back_start)) {
+		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "Could not setup functions\n");
+		return (-1);
+	}
+
 	return 0;
 }
 
@@ -45,5 +60,71 @@ riak_back_add(Slapi_PBlock *pb)
 	}
 
 	entry2json(e);
+	return 0;
+}
+
+int
+riak_back_bind(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_unbind(Slapi_PBlock *pb) 
+{
+	return 0;
+}
+
+int
+riak_back_search(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_compare(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_modify(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_modrdn(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_delete(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_config(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_close(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_back_flush(Slapi_PBlock *pb)
+{
+	return 0;
+}
+
+int
+riak_black_start(Slapi_PBlock *pb)
+{
 	return 0;
 }
