@@ -77,6 +77,24 @@ riak_back_bind(Slapi_PBlock *pb)
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
 		return (-1);
 	}
+
+	switch (method) {
+	case LDAP_AUTH_SIMPLE:
+		if (cred->bv_len == 0)
+			return SLAPI_BIND_ANONYMOUS;
+		break;
+	default:
+		slapi_send_ldap_result(pb, 
+				       LDAP_STRONG_AUTH_NOT_SUPPORTED, 
+				       NULL,
+				       "auth method not supported",
+				       0,
+				       NULL);
+		return SLAPI_BIND_FAIL;
+	}
+
+	/* return success for now */
+	return SLAPI_BIND_SUCCESS;
 }
 
 int
