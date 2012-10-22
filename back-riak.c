@@ -66,7 +66,17 @@ riak_back_add(Slapi_PBlock *pb)
 int
 riak_back_bind(Slapi_PBlock *pb)
 {
-	return 0;
+	char *dn;
+	int method;
+	struct berval *cred, **bvals;
+	Slapi_Attr *attr;
+
+	if (slapi_pblock_get(pb, SLAPI_BIND_TARGET, &dn) < 0 ||
+	    slapi_pblock_get(pb, SLAPI_BIND_METHOD, &method) < 0 ||
+	    slapi_pblock_get(pb, SLAPI_BIND_CREDENTIALS, &cred) < 0) {
+		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
+		return (-1);
+	}
 }
 
 int
