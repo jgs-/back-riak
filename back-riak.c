@@ -28,7 +28,9 @@ entry2json(Slapi_Entry *e)
 int 
 riak_back_init(Slapi_PBlock *pb)
 {
-	if (slapi_pblock_set(pb, SLAPI_PLUGIN_DB_BIND_FN, (void *)riak_back_bind) ||
+	if (slapi_pblock_set(pb, SLAPI_PLUGIN_DESCRIPTION, (void *)&pdesc) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_VERSION, (void *)SLAPI_PLUGIN_VERSION_01) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_BIND_FN, (void *)riak_back_bind) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_UNBIND_FN, (void *)riak_back_unbind) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_SEARCH_FN, (void *)riak_back_search) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_DB_COMPARE_FN, (void *)riak_back_compare) ||
