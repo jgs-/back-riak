@@ -1,4 +1,4 @@
-json_t *entry2json(Slapi_Entry *);
+json_t *entry2json(char *, Slapi_Entry *);
 
 struct csn
 {
