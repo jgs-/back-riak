@@ -18,25 +18,30 @@ static Slapi_PluginDesc pdesc = { "riak-backend",
 				  "University of Queensland",
 				  DS_PACKAGE_VERSION,
 				  "riak backend database plugin" };
-json_t *
+char *
 entry2json(char *dn, Slapi_Entry *e)
 {
 	int i = -1;
+	char *json;
 	Slapi_Attr *attr, *prevattr = NULL;
 	Slapi_Value *v;
+	json_t *ent, *arr;
+
+	ent = json_object();
+	json_object_set(ent, "dn", json_string(dn));
 
 	while (slapi_entry_next_attr(e, prevattr, &attr) != -1) {
+		arr = json_array();
+
 		while ((i = slapi_valueset_next_value(&attr->a_present_values, i, &v)) != -1)
-			/* attr->a_type is the attribute name and
-			 * slapi_value_get_string(v) will get the attr value */
-			slapi_log_error(SLAPI_LOG_PLUGIN, 
-					"riak-backend", "%s: %s\n",
-					attr->a_type, 
-					slapi_value_get_string(v));
+			json_array_append_new(arr, json_string(slapi_value_get_string(v)));
+
+		json_object_set(ent, attr->a_type, arr);
 		prevattr = attr;
 	}
 
-	return NULL;
+	json = json_dumps(ent, 0);
+	return json;
 }
 
 int
@@ -51,7 +56,7 @@ riak_back_add(Slapi_PBlock *pb)
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
 	}
 
-	entry2json(dn, e);
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", entry2json(dn, e));
 	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
 	return 0;
 }
