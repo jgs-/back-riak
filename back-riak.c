@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
@@ -6,6 +8,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include <curl/curl.h>
 
 #include "slapi-plugin.h" 
 #include "slapi-private.h"
@@ -13,11 +16,58 @@
 #include "back-riak.h"
 
 #define DS_PACKAGE_VERSION "1.2.10.14"
+#define RIAK_URL "http://localhost:8098/riak/ldap/"
+#define MAX_URL_SIZE 1024
 
 static Slapi_PluginDesc pdesc = { "riak-backend",
 				  "University of Queensland",
 				  DS_PACKAGE_VERSION,
 				  "riak backend database plugin" };
+
+int 
+riak_put(const char *key, const char *data) {
+	CURL *h;
+	CURLcode res;
+	struct curl_slist *headers;
+	char *url;
+	FILE *m;
+	unsigned int l;
+
+	curl_global_init(CURL_GLOBAL_ALL);
+	if ((h = curl_easy_init())) {
+		curl_easy_setopt(h, CURLOPT_UPLOAD, 1L);
+		curl_easy_setopt(h, CURLOPT_PUT, 1L);
+
+		l = strlen(key) + strlen(RIAK_URL) + 1;
+		if (!(url = malloc(l))) {
+			curl_easy_cleanup(h);
+			return (-1);
+		}
+		snprintf(url, l, "%s%s", RIAK_URL, key);
+		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", url);
+		m = fmemopen((void *)data, strlen(data), "r");
+
+		curl_easy_setopt(h, CURLOPT_READDATA, m);
+		curl_easy_setopt(h, CURLOPT_URL, url);
+		curl_easy_setopt(h, CURLOPT_INFILESIZE_LARGE, (curl_off_t)l);
+
+		headers = curl_slist_append(NULL, "Content-Type: application/json");
+		curl_easy_setopt(h, CURLOPT_HTTPHEADER, headers);
+
+		res = curl_easy_perform(h);
+		if (res != CURLE_OK) {
+			slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", curl_easy_strerror(res));
+			return -1;
+		}
+		curl_easy_cleanup(h);
+		fclose(m);
+		return 0;
+	}
+
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "end of riak_put()\n");
+	return -1;
+}
+
 char *
 entry2json(char *dn, Slapi_Entry *e)
 {
@@ -48,7 +98,7 @@ int
 riak_back_add(Slapi_PBlock *pb)
 {
 	Slapi_Entry *e;
-	char *dn;
+	char *dn, *data;
 
 	if (slapi_pblock_get(pb, SLAPI_ADD_TARGET, &dn) < 0 ||
 	    slapi_pblock_get(pb, SLAPI_ADD_ENTRY, &e) < 0) {
@@ -56,7 +106,12 @@ riak_back_add(Slapi_PBlock *pb)
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
 	}
 
-	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", entry2json(dn, e));
+	data = entry2json(dn, e);
+	if (riak_put(dn, data)) {
+		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "riak put failed\n");
+		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
+	}
+
 	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
 	return 0;
 }
