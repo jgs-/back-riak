@@ -46,10 +46,11 @@ riak_put(const char *key, const char *data) {
 		snprintf(url, l, "%s%s", RIAK_URL, key);
 		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", url);
 		m = fmemopen((void *)data, strlen(data), "r");
+		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%lu %u\n", strlen(data), l);
 
 		curl_easy_setopt(h, CURLOPT_READDATA, m);
 		curl_easy_setopt(h, CURLOPT_URL, url);
-		curl_easy_setopt(h, CURLOPT_INFILESIZE_LARGE, (curl_off_t)l);
+		curl_easy_setopt(h, CURLOPT_INFILESIZE_LARGE, (curl_off_t)strlen(data));
 
 		headers = curl_slist_append(NULL, "Content-Type: application/json");
 		curl_easy_setopt(h, CURLOPT_HTTPHEADER, headers);
@@ -59,6 +60,8 @@ riak_put(const char *key, const char *data) {
 			slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", curl_easy_strerror(res));
 			return -1;
 		}
+
+		curl_slist_free_all(headers);
 		curl_easy_cleanup(h);
 		fclose(m);
 		return 0;
