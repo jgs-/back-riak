@@ -15,9 +15,10 @@
 #include "jansson.h"
 #include "back-riak.h"
 
-#define DS_PACKAGE_VERSION "1.2.10.14"
-#define RIAK_URL "http://localhost:8098/riak/ldap/"
-#define MAX_URL_SIZE 1024
+#define DS_PACKAGE_VERSION 	"1.2.10.14"
+#define RIAK_URL 		"http://localhost:8098/riak/ldap/"
+#define MAX_URL_SIZE 		1024
+#define VCLOCK_HEADER 		"X-Riak-Vclock"
 
 static Slapi_PluginDesc pdesc = { "riak-backend",
 				  "University of Queensland",
@@ -27,6 +28,11 @@ static Slapi_PluginDesc pdesc = { "riak-backend",
 struct chunk {
 	char *mem;
 	size_t size;
+};
+
+struct response {
+	char *headers;
+	char *content;
 };
 
 static size_t
@@ -46,16 +52,21 @@ write_callback(void *contents, size_t size, size_t nmemb, void *p)
 	return s;
 }
 
-char *
+struct response *
 riak_get(const char *key)
 {
 	size_t len;
 	char *url;
 	CURL *h;
-	struct chunk retr;
+	struct chunk retr, headers;
+	struct response *resp;
 
+	headers.mem = malloc(1);
+	retr.size = headers.size = 0;
 	retr.mem = malloc(1);
-	retr.size = 0;
+	
+	if ((resp = malloc(sizeof(struct response))) == NULL)
+		return NULL;
 
 	len = strlen(RIAK_URL) + strlen(key) + 1;
 	if ((url = malloc(len)) == NULL || !(h = curl_easy_init()))
@@ -65,12 +76,15 @@ riak_get(const char *key)
 	curl_easy_setopt(h, CURLOPT_URL, url);
 	curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_callback);
 	curl_easy_setopt(h, CURLOPT_WRITEDATA, (void *)&retr);
+	curl_easy_setopt(h, CURLOPT_WRITEHEADER, (void *)&headers);
 	curl_easy_setopt(h, CURLOPT_USERAGENT, "389ds-riak/0.1");
 
 	curl_easy_perform(h);
 	curl_easy_cleanup(h);
 
-	return NULL;
+	resp->headers = headers.mem;
+	resp->content = retr.mem;
+	return resp;
 }
 
 int 
@@ -150,12 +164,22 @@ int
 riak_back_add(Slapi_PBlock *pb)
 {
 	Slapi_Entry *e;
-	char *dn, *data;
+	char *dn, *data, *str, *headers, *vclock = NULL;
+	struct response *r;
 
 	if (slapi_pblock_get(pb, SLAPI_ADD_TARGET, &dn) < 0 ||
 	    slapi_pblock_get(pb, SLAPI_ADD_ENTRY, &e) < 0) {
 		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "Couldn't get stuff\n");
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
+	}
+	
+	if ((r = riak_get(dn)) != NULL) {
+		headers = r->headers;
+		while ((vclock = strtok_r(headers, "\n", &str)) != NULL) {
+			headers = NULL;
+			if (!strncmp(vclock, VCLOCK_HEADER, strlen(VCLOCK_HEADER)))
+				break;
+		}
 	}
 
 	data = entry2json(dn, e);
