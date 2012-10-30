@@ -24,6 +24,55 @@ static Slapi_PluginDesc pdesc = { "riak-backend",
 				  DS_PACKAGE_VERSION,
 				  "riak backend database plugin" };
 
+struct chunk {
+	char *mem;
+	size_t size;
+};
+
+static size_t
+write_callback(void *contents, size_t size, size_t nmemb, void *p)
+{
+	size_t s = size * nmemb;
+	struct chunk *c = (struct chunk *)p;
+
+	c->mem = realloc(c->mem, c->size + s + 1);
+	if (c->mem == NULL)
+		return -1;
+
+	memcpy(&(c->mem[c->size]), contents, s);
+	c->size += s;
+	c->mem[c->size] = 0;
+
+	return s;
+}
+
+char *
+riak_get(const char *key)
+{
+	size_t len;
+	char *url;
+	CURL *h;
+	struct chunk retr;
+
+	retr.mem = malloc(1);
+	retr.size = 0;
+
+	len = strlen(RIAK_URL) + strlen(key) + 1;
+	if ((url = malloc(len)) == NULL || !(h = curl_easy_init()))
+		return NULL;
+	snprintf(url, len, "%s%s", RIAK_URL, key);
+
+	curl_easy_setopt(h, CURLOPT_URL, url);
+	curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_callback);
+	curl_easy_setopt(h, CURLOPT_WRITEDATA, (void *)&retr);
+	curl_easy_setopt(h, CURLOPT_USERAGENT, "389ds-riak/0.1");
+
+	curl_easy_perform(h);
+	curl_easy_cleanup(h);
+
+	return NULL;
+}
+
 int 
 riak_put(const char *key, const char *data) {
 	CURL *h;
@@ -44,20 +93,20 @@ riak_put(const char *key, const char *data) {
 			return (-1);
 		}
 		snprintf(url, l, "%s%s", RIAK_URL, key);
-		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", url);
 		m = fmemopen((void *)data, strlen(data), "r");
-		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%lu %u\n", strlen(data), l);
 
 		curl_easy_setopt(h, CURLOPT_READDATA, m);
 		curl_easy_setopt(h, CURLOPT_URL, url);
 		curl_easy_setopt(h, CURLOPT_INFILESIZE_LARGE, (curl_off_t)strlen(data));
-
 		headers = curl_slist_append(NULL, "Content-Type: application/json");
 		curl_easy_setopt(h, CURLOPT_HTTPHEADER, headers);
 
 		res = curl_easy_perform(h);
 		if (res != CURLE_OK) {
-			slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", curl_easy_strerror(res));
+			slapi_log_error(SLAPI_LOG_PLUGIN, 
+					"riak-backend", 
+					"curl: %s\n", 
+					curl_easy_strerror(res));
 			return -1;
 		}
 
