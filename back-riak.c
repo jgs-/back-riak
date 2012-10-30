@@ -57,9 +57,10 @@ riak_get(const char *key)
 {
 	size_t len;
 	char *url;
-	CURL *h;
 	struct chunk retr, headers;
 	struct response *resp;
+	CURL *h;
+	CURLcode res;
 
 	headers.mem = malloc(1);
 	retr.size = headers.size = 0;
@@ -78,8 +79,12 @@ riak_get(const char *key)
 	curl_easy_setopt(h, CURLOPT_WRITEDATA, (void *)&retr);
 	curl_easy_setopt(h, CURLOPT_WRITEHEADER, (void *)&headers);
 	curl_easy_setopt(h, CURLOPT_USERAGENT, "389ds-riak/0.1");
+	curl_easy_setopt(h, CURLOPT_FAILONERROR, 1L);
 
-	curl_easy_perform(h);
+	res = curl_easy_perform(h);
+	if (res != CURLE_OK)
+		return NULL;
+
 	curl_easy_cleanup(h);
 
 	resp->headers = headers.mem;
@@ -88,10 +93,10 @@ riak_get(const char *key)
 }
 
 int 
-riak_put(const char *key, const char *data) {
+riak_put(const char *key, const char *data, const char *vclock) {
 	CURL *h;
 	CURLcode res;
-	struct curl_slist *headers;
+	struct curl_slist *headers = NULL;
 	char *url;
 	FILE *m;
 	unsigned int l;
@@ -112,7 +117,10 @@ riak_put(const char *key, const char *data) {
 		curl_easy_setopt(h, CURLOPT_READDATA, m);
 		curl_easy_setopt(h, CURLOPT_URL, url);
 		curl_easy_setopt(h, CURLOPT_INFILESIZE_LARGE, (curl_off_t)strlen(data));
-		headers = curl_slist_append(NULL, "Content-Type: application/json");
+
+		if (vclock != NULL)
+			headers = curl_slist_append(headers, vclock);
+		headers = curl_slist_append(headers, "Content-Type: application/json");
 		curl_easy_setopt(h, CURLOPT_HTTPHEADER, headers);
 
 		res = curl_easy_perform(h);
@@ -164,7 +172,7 @@ int
 riak_back_add(Slapi_PBlock *pb)
 {
 	Slapi_Entry *e;
-	char *dn, *data, *str, *headers, *vclock = NULL;
+	char *dn, *data;
 	struct response *r;
 
 	if (slapi_pblock_get(pb, SLAPI_ADD_TARGET, &dn) < 0 ||
@@ -174,16 +182,13 @@ riak_back_add(Slapi_PBlock *pb)
 	}
 	
 	if ((r = riak_get(dn)) != NULL) {
-		headers = r->headers;
-		while ((vclock = strtok_r(headers, "\n", &str)) != NULL) {
-			headers = NULL;
-			if (!strncmp(vclock, VCLOCK_HEADER, strlen(VCLOCK_HEADER)))
-				break;
-		}
-	}
-
+		/* entry already exists */
+		slapi_send_ldap_result(pb, LDAP_ALREADY_EXISTS, NULL, NULL, 0, NULL);
+		return 0;
+	}	
+	
 	data = entry2json(dn, e);
-	if (riak_put(dn, data)) {
+	if (riak_put(dn, data, NULL)) {
 		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "riak put failed\n");
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
 	}
