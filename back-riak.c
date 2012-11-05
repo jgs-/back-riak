@@ -197,6 +197,57 @@ riak_back_add(Slapi_PBlock *pb)
 	return 0;
 }
 
+int
+riak_back_mod(Slapi_PBlock *pb)
+{
+	int i, j;
+	char *dn, *str, *headers, *json, *vclock = NULL;
+	struct response *r;
+	LDAPMod **mods;
+	json_t *entry, *attr;
+
+	if (slapi_pblock_get(pb, SLAPI_MODIFY_TARGET, &dn) ||
+	    slapi_pblock_get(pb, SLAPI_MODIFY_MODS, &mods)) {
+		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "Could not get parameters\n");
+		return -1;
+	}
+
+	if ((r = riak_get(dn)) == NULL) {
+		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
+		return -1;
+	}
+
+	headers = r->headers;
+	while ((vclock = strtok_r(headers, "\n", &str)) != NULL) {
+		headers = NULL;
+		if (!strncmp(vclock, VCLOCK_HEADER, strlen(VCLOCK_HEADER)))
+			break;
+	}
+
+	if (vclock == NULL) {
+		slapi_send_ldap_result(pb, LDAP_NO_SUCH_OBJECT, NULL, NULL, 0, NULL);
+		return -1;
+	}
+
+	entry = json_loads(r->content, 0, NULL);
+	for (i = 0; mods[i] != NULL; i++) {
+		if ((attr = json_object_get(entry, mods[i]->mod_type)) == NULL)
+			attr = json_array();
+
+		for (j = 0; mods[i]->mod_bvalues[j] != NULL; j++)
+			json_array_append_new(attr, json_string((char *)mods[i]->mod_bvalues[j]->bv_val));
+		json_object_set(entry, mods[i]->mod_type, attr);
+	}
+
+	json = json_dumps(entry, 0);
+	if (riak_put(dn, json, vclock)) {
+		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
+		return -1;
+	}
+
+	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
+	return 0;
+}
 
 int
 riak_back_bind(Slapi_PBlock *pb)
@@ -209,9 +260,10 @@ riak_back_init(Slapi_PBlock *pb)
 {
 	if (slapi_pblock_set(pb, SLAPI_PLUGIN_DESCRIPTION, (void *)&pdesc) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_VERSION, SLAPI_PLUGIN_VERSION_01) ||
-	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_ADD_FN, (void *)&riak_back_add)) {
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_ADD_FN, (void *)&riak_back_add) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_MODIFY_FN, (void *)&riak_back_mod)) {
 		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "Couldn't setup functions\n");
-		return (-1);
+		return -1;
 	}
 
 	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "Initialized\n");
