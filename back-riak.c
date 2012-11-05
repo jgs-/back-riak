@@ -231,7 +231,11 @@ riak_back_mod(Slapi_PBlock *pb)
 
 	entry = json_loads(r->content, 0, NULL);
 	for (i = 0; mods[i] != NULL; i++) {
-		if ((attr = json_object_get(entry, mods[i]->mod_type)) == NULL)
+		if (SLAPI_IS_MOD_ADD(mods[i]->mod_op)) {
+			attr = json_object_get(entry, mods[i]->mod_type);
+			if (attr == NULL)
+				attr = json_array();
+		} else
 			attr = json_array();
 
 		for (j = 0; mods[i]->mod_bvalues[j] != NULL; j++)
