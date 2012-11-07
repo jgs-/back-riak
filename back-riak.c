@@ -35,6 +35,17 @@ struct response {
 	char *content;
 };
 
+void
+convert_space(char *s)
+{
+	int i;
+
+	for (i = 0; s[i] != '\0'; i++) {
+		if (s[i] == ' ')
+			s[i] = '+';
+	}
+}
+
 static size_t
 write_callback(void *contents, size_t size, size_t nmemb, void *p)
 {
@@ -56,11 +67,15 @@ struct response *
 riak_get(const char *key)
 {
 	size_t len;
-	char *url;
+	char *url, *dn;
 	struct chunk retr, headers;
 	struct response *resp;
 	CURL *h;
 	CURLcode res;
+
+	if ((dn = strdup(key)) == NULL)
+		return NULL;
+	convert_space(dn);
 
 	headers.mem = malloc(1);
 	retr.size = headers.size = 0;
@@ -69,10 +84,10 @@ riak_get(const char *key)
 	if ((resp = malloc(sizeof(struct response))) == NULL)
 		return NULL;
 
-	len = strlen(RIAK_URL) + strlen(key) + 1;
+	len = strlen(RIAK_URL) + strlen(dn) + 1;
 	if ((url = malloc(len)) == NULL || !(h = curl_easy_init()))
 		return NULL;
-	snprintf(url, len, "%s%s", RIAK_URL, key);
+	snprintf(url, len, "%s%s", RIAK_URL, dn);
 
 	curl_easy_setopt(h, CURLOPT_URL, url);
 	curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_callback);
@@ -82,10 +97,10 @@ riak_get(const char *key)
 	curl_easy_setopt(h, CURLOPT_FAILONERROR, 1L);
 
 	res = curl_easy_perform(h);
+	curl_easy_cleanup(h);
+
 	if (res != CURLE_OK)
 		return NULL;
-
-	curl_easy_cleanup(h);
 
 	resp->headers = headers.mem;
 	resp->content = retr.mem;
@@ -97,48 +112,47 @@ riak_put(const char *key, const char *data, const char *vclock) {
 	CURL *h;
 	CURLcode res;
 	struct curl_slist *headers = NULL;
-	char *url;
+	char *url, *dn;
 	FILE *m;
 	unsigned int l;
 
 	curl_global_init(CURL_GLOBAL_ALL);
 	if ((h = curl_easy_init())) {
-		curl_easy_setopt(h, CURLOPT_UPLOAD, 1L);
-		curl_easy_setopt(h, CURLOPT_PUT, 1L);
+		dn = strdup(key);
+		convert_space(dn);
 
-		l = strlen(key) + strlen(RIAK_URL) + 1;
+		l = strlen(dn) + strlen(RIAK_URL) + 1;
 		if (!(url = malloc(l))) {
 			curl_easy_cleanup(h);
 			return (-1);
 		}
-		snprintf(url, l, "%s%s", RIAK_URL, key);
+		snprintf(url, l, "%s%s", RIAK_URL, dn);
+
 		m = fmemopen((void *)data, strlen(data), "r");
 
+		curl_easy_setopt(h, CURLOPT_UPLOAD, 1L);
+		curl_easy_setopt(h, CURLOPT_PUT, 1L);
 		curl_easy_setopt(h, CURLOPT_READDATA, m);
 		curl_easy_setopt(h, CURLOPT_URL, url);
 		curl_easy_setopt(h, CURLOPT_INFILESIZE_LARGE, (curl_off_t)strlen(data));
-
+		
 		if (vclock != NULL)
 			headers = curl_slist_append(headers, vclock);
 		headers = curl_slist_append(headers, "Content-Type: application/json");
 		curl_easy_setopt(h, CURLOPT_HTTPHEADER, headers);
-
+	
 		res = curl_easy_perform(h);
-		if (res != CURLE_OK) {
-			slapi_log_error(SLAPI_LOG_PLUGIN, 
-					"riak-backend", 
-					"curl: %s\n", 
-					curl_easy_strerror(res));
-			return -1;
-		}
-
 		curl_slist_free_all(headers);
 		curl_easy_cleanup(h);
 		fclose(m);
-		return 0;
+		free(dn);
+
+		if (res == CURLE_OK) {
+			return 0;
+		}
 	}
 
-	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "end of riak_put()\n");
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "riak_put() error\n");
 	return -1;
 }
 
@@ -172,21 +186,22 @@ int
 riak_back_add(Slapi_PBlock *pb)
 {
 	Slapi_Entry *e;
-	char *dn, *data;
+	char *dn, *data, *key;
 	struct response *r;
+
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "ADD begin\n");
 
 	if (slapi_pblock_get(pb, SLAPI_ADD_TARGET, &dn) < 0 ||
 	    slapi_pblock_get(pb, SLAPI_ADD_ENTRY, &e) < 0) {
 		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "Couldn't get stuff\n");
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
 	}
-	
+
 	if ((r = riak_get(dn)) != NULL) {
-		/* entry already exists */
 		slapi_send_ldap_result(pb, LDAP_ALREADY_EXISTS, NULL, NULL, 0, NULL);
 		return 0;
 	}	
-	
+
 	data = entry2json(dn, e);
 	if (riak_put(dn, data, NULL)) {
 		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "riak put failed\n");
@@ -205,6 +220,8 @@ riak_back_mod(Slapi_PBlock *pb)
 	struct response *r;
 	LDAPMod **mods;
 	json_t *entry, *attr;
+
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "MODIFY begin\n");
 
 	if (slapi_pblock_get(pb, SLAPI_MODIFY_TARGET, &dn) ||
 	    slapi_pblock_get(pb, SLAPI_MODIFY_MODS, &mods)) {
