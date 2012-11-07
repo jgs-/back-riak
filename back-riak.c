@@ -198,6 +198,9 @@ riak_back_add(Slapi_PBlock *pb)
 	}
 
 	if ((r = riak_get(dn)) != NULL) {
+		free(r->headers);
+		free(r->content);
+		free(r);
 		slapi_send_ldap_result(pb, LDAP_ALREADY_EXISTS, NULL, NULL, 0, NULL);
 		return 0;
 	}	
@@ -206,8 +209,11 @@ riak_back_add(Slapi_PBlock *pb)
 	if (riak_put(dn, data, NULL)) {
 		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "riak put failed\n");
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
+		free(data);
+		return -1;
 	}
-
+	
+	free(data);
 	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
 	return 0;
 }
