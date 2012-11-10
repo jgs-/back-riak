@@ -46,6 +46,35 @@ convert_space(char *s)
 	}
 }
 
+void
+tok(char *in, char **out)
+{
+	char *p = in;
+	char *n;
+
+	n = p;
+	while (*n != ',' && *n != '\0')
+		n++;
+
+	if (*n == ',') {
+		tok(n+1, out);
+		*(*out)++ = ',';
+	}
+
+	while (p != n)
+		*(*out)++ = *p++;
+}
+
+char *
+reverse_dn(char *i)
+{
+	char *o = calloc(1, strlen(i) + 1);
+	char *p = o;
+	tok(i, &o);
+
+	return p;
+}
+
 static size_t
 write_callback(void *contents, size_t size, size_t nmemb, void *p)
 {
@@ -147,9 +176,8 @@ riak_put(const char *key, const char *data, const char *vclock) {
 		fclose(m);
 		free(dn);
 
-		if (res == CURLE_OK) {
+		if (res == CURLE_OK)
 			return 0;
-		}
 	}
 
 	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "riak_put() error\n");
@@ -186,7 +214,7 @@ int
 riak_back_add(Slapi_PBlock *pb)
 {
 	Slapi_Entry *e;
-	char *dn, *data, *key;
+	char *dn, *data;
 	struct response *r;
 
 	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "ADD begin\n");
@@ -196,6 +224,9 @@ riak_back_add(Slapi_PBlock *pb)
 		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "Couldn't get stuff\n");
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
 	}
+
+	dn = reverse_dn(dn);
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "%s\n", dn);
 
 	if ((r = riak_get(dn)) != NULL) {
 		free(r->headers);
@@ -234,6 +265,8 @@ riak_back_mod(Slapi_PBlock *pb)
 		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "Could not get parameters\n");
 		return -1;
 	}
+
+	dn = reverse_dn(dn);
 
 	if ((r = riak_get(dn)) == NULL) {
 		slapi_send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, NULL, 0, NULL);
@@ -277,6 +310,25 @@ riak_back_mod(Slapi_PBlock *pb)
 }
 
 int
+riak_back_search(Slapi_PBlock *pb)
+{
+	int scope;
+	char *target, *sdn, *filter;
+	Slapi_Operation *op;
+
+	if (slapi_pblock_get(pb, SLAPI_OPERATION, &op) ||
+	    slapi_pblock_get(pb, SLAPI_SEARCH_STRFILTER, &filter) ||
+	    slapi_pblock_get(pb, SLAPI_SEARCH_SCOPE, &scope) ||
+	    slapi_pblock_get(pb, SLAPI_SEARCH_TARGET_SDN, &sdn)) {
+		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "riak_back_search couldn't get PBs\n");
+		return -1;
+	}
+
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "filter: %s\n", filter);
+	return 0;
+}
+
+int
 riak_back_bind(Slapi_PBlock *pb)
 {
 	return 0;
@@ -287,6 +339,7 @@ riak_back_init(Slapi_PBlock *pb)
 {
 	if (slapi_pblock_set(pb, SLAPI_PLUGIN_DESCRIPTION, (void *)&pdesc) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_VERSION, SLAPI_PLUGIN_VERSION_01) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_SEARCH_FN, (void *)&riak_back_search) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_ADD_FN, (void *)&riak_back_add) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_MODIFY_FN, (void *)&riak_back_mod)) {
 		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "Couldn't setup functions\n");
