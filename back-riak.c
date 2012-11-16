@@ -17,12 +17,12 @@
 
 #define DS_PACKAGE_VERSION 	"1.2.10.14"
 #define RIAK_URL 		"http://localhost:8098/riak/ldap/"
+#define MAPRED_URL		"http://localhost:8098/mapred"
 #define MAX_URL_SIZE 		1024
 #define INDEX_HEADER		"x-riak-index-%s_bin: %s"
 #define VCLOCK_HEADER 		"X-Riak-Vclock"
 
 struct response *riak_get(const char *);
-
 static Slapi_PluginDesc pdesc = { "riak-backend",
 				  "University of Queensland",
 				  DS_PACKAGE_VERSION,
@@ -46,6 +46,8 @@ convert_space(char *s)
 	for (i = 0; s[i] != '\0'; i++) {
 		if (s[i] == ' ')
 			s[i] = '+';
+		else if (isalpha(s[i]))
+			s[i] = tolower(s[i]);
 	}
 }
 
@@ -104,7 +106,6 @@ add_index(const char *data, struct curl_slist *headers)
 	const char *attr, *v;
 	struct response *r = NULL;
 	json_t *entry, *indexes, *idx, *values;
-	json_error_t *err;
 
 	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "add_index\n");
 	r = riak_get("indexes");
@@ -251,6 +252,55 @@ riak_put(const char *key, const char *data, const char *vclock) {
 }
 
 char *
+mapreduce(char *job) {
+	struct chunk retr;
+	CURL *h;
+	CURLcode res;	
+
+	retr.size = 0;
+	retr.mem = malloc(1);	
+}
+
+char *
+make_map(const char *filter, char *base)
+{
+	char *json;
+	json_t *job, *inputs, *query, *map, *key_filters, *key, *o;
+	
+	inputs = json_object();
+	job = json_object();
+	map = json_object();
+	o = json_object();
+	key_filters = json_array();
+	query = json_array();
+	key = json_array();
+
+	json_array_append_new(key, json_string("starts_with"));
+	json_array_append_new(key, json_string(reverse_dn(base)));
+	json_array_append(key_filters, key);
+
+	json_object_set_new(map, "language", json_string("javascript"));
+	json_object_set_new(map, "bucket", json_string("code"));
+	json_object_set_new(map, "key", json_string("map_ldap_search"));
+	json_object_set_new(map, "keep", json_true());
+	json_object_set_new(map, "arg", json_string(filter));
+	
+	json_object_set(o, "map", map);
+	json_array_append(query, o);
+
+	json_object_set_new(inputs, "bucket", json_string("ldap"));
+	json_object_set(inputs, "key_filters", key_filters);
+
+	json_object_set(job, "inputs", inputs);
+	json_object_set(job, "query", query);
+
+	json = json_dumps(job, JSON_INDENT(4));
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "m/r:\n%s\n", json);
+
+	return json;
+}
+
+char *
 entry2json(char *dn, Slapi_Entry *e)
 {
 	int i = -1;
@@ -391,7 +441,7 @@ riak_back_search(Slapi_PBlock *pb)
 		return -1;
 	}
 	
-	if (strlen(base) < 1) {
+	if (base[0] == '\0') {
 		slapi_send_ldap_result(pb, LDAP_NO_SUCH_OBJECT, NULL, NULL, 0, NULL);
 		return 0;
 	}
@@ -400,6 +450,7 @@ riak_back_search(Slapi_PBlock *pb)
 	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "search:\n\tbase: %s\n\tfilter: %s\n", dn, filter);
 
 	/* TODO build and send the mapreduce query */
+	make_map(filter, base);
 
 	free(dn);
 	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
