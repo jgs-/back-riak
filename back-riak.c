@@ -18,7 +18,10 @@
 #define DS_PACKAGE_VERSION 	"1.2.10.14"
 #define RIAK_URL 		"http://localhost:8098/riak/ldap/"
 #define MAX_URL_SIZE 		1024
+#define INDEX_HEADER		"x-riak-index-%s_bin: %s"
 #define VCLOCK_HEADER 		"X-Riak-Vclock"
+
+struct response *riak_get(const char *);
 
 static Slapi_PluginDesc pdesc = { "riak-backend",
 				  "University of Queensland",
@@ -92,6 +95,68 @@ write_callback(void *contents, size_t size, size_t nmemb, void *p)
 	return s;
 }
 
+struct curl_slist *
+add_index(const char *data, struct curl_slist *headers)
+{
+	int i, j;
+	char *h;
+	size_t sz, n;
+	const char *attr, *v;
+	struct response *r = NULL;
+	json_t *entry, *indexes, *idx, *values;
+	json_error_t *err;
+
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "add_index\n");
+	r = riak_get("indexes");
+	if (!r)
+		return headers;
+
+	indexes = json_loads(r->content, 0, NULL);
+	entry = json_loads(data, 0, NULL);
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "indexes: %s\n", r->content);
+
+	n = json_array_size(indexes);
+	if (!n) {
+		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "!n\n");
+		goto fin;
+	}
+
+	for (i = 0; i < n; i++) {
+		idx = json_array_get(indexes, i);
+		attr = json_string_value(idx);	
+		if (attr == NULL) {
+			slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "!attr\n");
+			goto fin;
+		}
+		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "attr: %s\n", attr);
+
+		if (!(values = json_object_get(entry, attr)))
+			continue;
+
+		for (j = 0; j < json_array_size(values); j++) {
+			v = json_string_value(json_array_get(values, j));
+			sz = strlen(INDEX_HEADER) + strlen(attr) + strlen(v);
+
+			if (!(h = malloc(sz)))
+				goto fin;
+	
+			snprintf(h, sz, INDEX_HEADER, attr, v); 
+			slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "adding index: %s\n", h);
+			headers = curl_slist_append(headers, h);
+			free(h);
+		}
+
+	}
+
+fin:
+	if (r) {
+		free(r->headers);
+		free(r->content);
+		free(r);
+	}
+	return headers;
+}
+
 struct response *
 riak_get(const char *key)
 {
@@ -141,9 +206,9 @@ riak_put(const char *key, const char *data, const char *vclock) {
 	CURL *h;
 	CURLcode res;
 	struct curl_slist *headers = NULL;
+	unsigned int l;
 	char *url, *dn;
 	FILE *m;
-	unsigned int l;
 
 	curl_global_init(CURL_GLOBAL_ALL);
 	if ((h = curl_easy_init())) {
@@ -168,6 +233,7 @@ riak_put(const char *key, const char *data, const char *vclock) {
 		if (vclock != NULL)
 			headers = curl_slist_append(headers, vclock);
 		headers = curl_slist_append(headers, "Content-Type: application/json");
+		headers = add_index(data, headers);
 		curl_easy_setopt(h, CURLOPT_HTTPHEADER, headers);
 	
 		res = curl_easy_perform(h);
@@ -313,18 +379,30 @@ int
 riak_back_search(Slapi_PBlock *pb)
 {
 	int scope;
-	char *target, *sdn, *filter;
+	char *filter, *dn, *base = NULL;
+	struct response *r;
 	Slapi_Operation *op;
 
 	if (slapi_pblock_get(pb, SLAPI_OPERATION, &op) ||
 	    slapi_pblock_get(pb, SLAPI_SEARCH_STRFILTER, &filter) ||
 	    slapi_pblock_get(pb, SLAPI_SEARCH_SCOPE, &scope) ||
-	    slapi_pblock_get(pb, SLAPI_SEARCH_TARGET_SDN, &sdn)) {
+	    slapi_pblock_get(pb, SLAPI_SEARCH_TARGET, &base)) {
 		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "riak_back_search couldn't get PBs\n");
 		return -1;
 	}
+	
+	if (strlen(base) < 1) {
+		slapi_send_ldap_result(pb, LDAP_NO_SUCH_OBJECT, NULL, NULL, 0, NULL);
+		return 0;
+	}
 
-	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "filter: %s\n", filter);
+	dn = reverse_dn(base);
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "search:\n\tbase: %s\n\tfilter: %s\n", dn, filter);
+
+	/* TODO build and send the mapreduce query */
+
+	free(dn);
+	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
 	return 0;
 }
 
