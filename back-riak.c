@@ -46,8 +46,6 @@ convert_space(char *s)
 	for (i = 0; s[i] != '\0'; i++) {
 		if (s[i] == ' ')
 			s[i] = '+';
-		else if (isalpha(s[i]))
-			s[i] = tolower(s[i]);
 	}
 }
 
