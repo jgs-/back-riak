@@ -257,6 +257,20 @@ mapreduce(char *job) {
 
 	retr.size = 0;
 	retr.mem = malloc(1);	
+
+	curl_easy_setopt(h, CURLOPT_URL, MAPRED_URL);
+	curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_callback);
+	curl_easy_setopt(h, CURLOPT_WRITEDATA, (void *)&retr);
+	curl_easy_setopt(h, CURLOPT_USERAGENT, "389ds-riak/0.1");
+	curl_easy_setopt(h, CURLOPT_FAILONERROR, 1L);
+
+	res = curl_easy_perform(h);
+	curl_easy_cleanup(h);
+
+	if (res != CURLE_OK)
+		return NULL;
+
+	return retr.mem;
 }
 
 char *
