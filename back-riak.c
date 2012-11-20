@@ -350,6 +350,38 @@ entry2json(char *dn, Slapi_Entry *e)
 	return json;
 }
 
+Slapi_Entry *
+json2entry(char *key, char *blob)
+{
+	size_t i, n;
+	char *attr
+	json_t *j, *a, *val;
+	Slapi_Entry *e;
+
+	j = json_loads(blob, 0, NULL);
+	if (!j)
+		return NULL;
+
+	e = slapi_entry_alloc();
+	slapi_entry_init(e, reverse_dn(key), NULL);
+
+	json_object_foreach(j, attr, a) {
+		n = json_array_size(a);
+		if (!n)
+			continue;
+
+		for (i = 0; i < n; i++) {
+			val = json_array_get(a, i);
+			if (!val)
+				continue;
+
+			slapi_entry_add_string(e, attr, json_string_value(val));
+		}
+	}
+
+	return e;
+}
+
 int
 riak_back_add(Slapi_PBlock *pb)
 {
