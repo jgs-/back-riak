@@ -286,7 +286,7 @@ char *
 make_map(const char *filter, char *base)
 {
 	char *json;
-	json_t *job, *inputs, *query, *map, *key_filters, *key, *o;
+	json_t *job, *inputs, *query, *map, *key_filters, *key, *o, *t;
 	
 	inputs = json_object();
 	job = json_object();
@@ -295,8 +295,10 @@ make_map(const char *filter, char *base)
 	key_filters = json_array();
 	query = json_array();
 	key = json_array();
+	t = json_array();
 
-	json_array_append_new(key, json_string("to_lower"));
+	json_array_append_new(t, json_string("to_lower"));
+	json_array_append(key_filters, t);
 	json_array_append_new(key, json_string("starts_with"));
 	json_array_append_new(key, json_string(reverse_dn(base)));
 	json_array_append(key_filters, key);
