@@ -296,6 +296,7 @@ make_map(const char *filter, char *base)
 	query = json_array();
 	key = json_array();
 
+	json_array_append_new(key, json_string("to_lower"));
 	json_array_append_new(key, json_string("starts_with"));
 	json_array_append_new(key, json_string(reverse_dn(base)));
 	json_array_append(key_filters, key);
