@@ -252,18 +252,27 @@ riak_put(const char *key, const char *data, const char *vclock) {
 char *
 mapreduce(char *job) {
 	struct chunk retr;
+	struct curl_slist *headers = NULL;
 	CURL *h;
 	CURLcode res;	
 
+	if (!(h = curl_easy_init()))
+		return NULL;
+	
 	retr.size = 0;
 	retr.mem = malloc(1);	
 
+	curl_easy_setopt(h, CURLOPT_POST, 1L);
 	curl_easy_setopt(h, CURLOPT_URL, MAPRED_URL);
+	curl_easy_setopt(h, CURLOPT_POSTFIELDS, job); 
 	curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, write_callback);
 	curl_easy_setopt(h, CURLOPT_WRITEDATA, (void *)&retr);
 	curl_easy_setopt(h, CURLOPT_USERAGENT, "389ds-riak/0.1");
 	curl_easy_setopt(h, CURLOPT_FAILONERROR, 1L);
 
+	headers = curl_slist_append(headers, "Content-Type: application/json");
+	curl_easy_setopt(h, CURLOPT_HTTPHEADER, headers);
+	
 	res = curl_easy_perform(h);
 	curl_easy_cleanup(h);
 
