@@ -354,7 +354,7 @@ Slapi_Entry *
 json2entry(char *key, char *blob)
 {
 	size_t i, n;
-	char *attr
+	const char *attr;
 	json_t *j, *a, *val;
 	Slapi_Entry *e;
 
