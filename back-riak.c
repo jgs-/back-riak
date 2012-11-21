@@ -38,6 +38,12 @@ struct response {
 	char *content;
 };
 
+struct entry {
+	char *key;
+	char **attrs;
+	Slapi_Entry *ent;
+};
+
 void
 convert_space(char *s)
 {
@@ -350,20 +356,23 @@ entry2json(char *dn, Slapi_Entry *e)
 	return json;
 }
 
-Slapi_Entry *
-json2entry(char *key, char *blob)
+struct entry * 
+json2entry(const char *key, json_t *j)
 {
 	size_t i, n;
 	const char *attr;
-	json_t *j, *a, *val;
+	char *dn;
+	struct entry *res;
+	json_t *a, *val;
 	Slapi_Entry *e;
 
-	j = json_loads(blob, 0, NULL);
-	if (!j)
-		return NULL;
-
+	dn = strdup(key);
 	e = slapi_entry_alloc();
-	slapi_entry_init(e, reverse_dn(key), NULL);
+	res = malloc(sizeof(struct entry));
+	slapi_entry_init(e, reverse_dn(dn), NULL);
+
+	res->key = strdup(key);
+	res->attrs = calloc(sizeof(char *), json_object_size(j) + 1);
 
 	json_object_foreach(j, attr, a) {
 		n = json_array_size(a);
@@ -379,7 +388,28 @@ json2entry(char *key, char *blob)
 		}
 	}
 
-	return e;
+	res->ent = e;
+	return res;
+}
+
+int
+parse_search_results(Slapi_PBlock *pb, char *blob)
+{
+	size_t i, n;
+	struct entry *e;
+	json_t *results, *r, *data;
+
+	if (!(results = json_loads(blob, 0, NULL)) || !(n = json_array_size(results)))
+		return 0;
+
+	for (i = 0; i < n; i++) {
+		r = json_array_get(results, i);
+		data = json_array_get(r, 1);
+		e = json2entry(json_string_value(json_array_get(r, 0)), data);
+		slapi_send_ldap_search_entry(pb, e->ent, NULL, e->attrs, 0);	
+	}
+
+	return i;
 }
 
 int
@@ -415,7 +445,7 @@ riak_back_add(Slapi_PBlock *pb)
 		free(data);
 		return -1;
 	}
-	
+
 	free(data);
 	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
 	return 0;
@@ -485,9 +515,8 @@ int
 riak_back_search(Slapi_PBlock *pb)
 {
 	int scope;
-	char *filter, *dn, *base = NULL;
-	struct response *r;
 	Slapi_Operation *op;
+	char *q, *r, *filter, *base = NULL;
 
 	if (slapi_pblock_get(pb, SLAPI_OPERATION, &op) ||
 	    slapi_pblock_get(pb, SLAPI_SEARCH_STRFILTER, &filter) ||
@@ -502,14 +531,13 @@ riak_back_search(Slapi_PBlock *pb)
 		return 0;
 	}
 
-	dn = reverse_dn(base);
-	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "search:\n\tbase: %s\n\tfilter: %s\n", dn, filter);
+	q = make_map(filter, base);
+	if (!(r = mapreduce(q))) {
+		slapi_send_ldap_result(pb, LDAP_NO_SUCH_OBJECT, NULL, NULL, 0, NULL);
+		return 0;
+	}
 
-	/* TODO build and send the mapreduce query */
-	make_map(filter, base);
-
-	free(dn);
-	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
+	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, parse_search_results(pb, r), NULL);
 	return 0;
 }
 
