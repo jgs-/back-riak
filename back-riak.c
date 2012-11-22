@@ -325,7 +325,6 @@ make_map(const char *filter, char *base)
 	json_object_set(job, "query", query);
 
 	json = json_dumps(job, JSON_INDENT(4));
-	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "m/r:\n%s\n", json);
 
 	return json;
 }
@@ -356,23 +355,17 @@ entry2json(char *dn, Slapi_Entry *e)
 	return json;
 }
 
-struct entry * 
+Slapi_Entry *
 json2entry(const char *key, json_t *j)
 {
 	size_t i, n;
 	const char *attr;
-	char *dn;
-	struct entry *res;
+	char *dn, **p;
 	json_t *a, *val;
 	Slapi_Entry *e;
-
-	dn = strdup(key);
+	
 	e = slapi_entry_alloc();
-	res = malloc(sizeof(struct entry));
-	slapi_entry_init(e, reverse_dn(dn), NULL);
-
-	res->key = strdup(key);
-	res->attrs = calloc(sizeof(char *), json_object_size(j) + 1);
+	slapi_entry_init(e, reverse_dn(strdup(dn)), NULL);
 
 	json_object_foreach(j, attr, a) {
 		n = json_array_size(a);
@@ -386,27 +379,36 @@ json2entry(const char *key, json_t *j)
 
 			slapi_entry_add_string(e, attr, json_string_value(val));
 		}
+		*(p++) = strdup(attr);
 	}
 
-	res->ent = e;
-	return res;
+	return e;
 }
 
 int
 parse_search_results(Slapi_PBlock *pb, char *blob)
 {
+	char **attrs;
+	int attrsonly;
 	size_t i, n;
-	struct entry *e;
+	const char *key;
+	Slapi_Entry *e;
 	json_t *results, *r, *data;
 
+	slapi_pblock_get(pb, SLAPI_SEARCH_ATTRS, &attrs);
+	slapi_pblock_get(pb, SLAPI_SEARCH_ATTRSONLY, &attrsonly);
+	
 	if (!(results = json_loads(blob, 0, NULL)) || !(n = json_array_size(results)))
 		return 0;
 
 	for (i = 0; i < n; i++) {
-		r = json_array_get(results, i);
-		data = json_array_get(r, 1);
+		if (!(r = json_array_get(results, i)) ||
+		    !(key = json_string_value(json_array_get(r, 0))) ||
+		    !(data = json_array_get(r, 1)))
+			continue;
+
 		e = json2entry(json_string_value(json_array_get(r, 0)), data);
-		slapi_send_ldap_search_entry(pb, e->ent, NULL, e->attrs, 0);	
+		slapi_send_ldap_search_entry(pb, e, NULL, attrs, attrsonly);
 	}
 
 	return i;
