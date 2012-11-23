@@ -359,27 +359,25 @@ Slapi_Entry *
 json2entry(const char *key, json_t *j)
 {
 	size_t i, n;
-	const char *attr;
-	char *dn, **p;
+	const char *s, *attr;
 	json_t *a, *val;
 	Slapi_Entry *e;
 	
 	e = slapi_entry_alloc();
-	slapi_entry_init(e, reverse_dn(strdup(dn)), NULL);
+	slapi_entry_init(e, reverse_dn(strdup(key)), NULL);
 
 	json_object_foreach(j, attr, a) {
-		n = json_array_size(a);
-		if (!n)
+		if (!attr || !(n = json_array_size(a)))
 			continue;
 
 		for (i = 0; i < n; i++) {
 			val = json_array_get(a, i);
-			if (!val)
+			s = json_string_value(val);
+			if (!s)
 				continue;
 
-			slapi_entry_add_string(e, attr, json_string_value(val));
+			slapi_entry_add_string(e, attr, s);
 		}
-		*(p++) = strdup(attr);
 	}
 
 	return e;
