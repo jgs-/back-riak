@@ -334,7 +334,7 @@ function(riakObject, keyData, arg) {
 
 	ret = [];
 
-	thing += ") { ret = [riakObject.key, entry] }";
+	thing += ") { ret = [[riakObject.key, entry]] }";
 	eval(thing);
 
 	return ret;
