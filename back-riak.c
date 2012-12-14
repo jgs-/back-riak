@@ -162,6 +162,40 @@ fin:
 	return headers;
 }
 
+int
+is_index(const char *index)
+{
+	int i, n, rc = 0;
+	const char *v;
+	struct response *r = NULL;
+	json_t *indexes, *idx;
+
+	if (!index || !(r = riak_get("indexes")))
+		return rc;
+
+	indexes = json_loads(r->content, 0, NULL);
+	if (!(n = json_array_size(indexes)))
+		goto fin;
+
+	for (i = 0; i < n; i++) {
+		idx = json_array_get(indexes, i);
+		v = json_string_value(idx);
+		if (!strcmp(v, index)) {
+			rc = 1;
+			break;
+		}
+	}
+
+fin:
+	if (r) {
+		free(r->headers);
+		free(r->content);
+		free(r);
+	}
+
+	return rc;
+}
+
 struct response *
 riak_get(const char *key)
 {
