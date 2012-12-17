@@ -322,10 +322,13 @@ mapreduce(char *job) {
 	return retr.mem;
 }
 
+/* TODO if index, use index, otherwise use key_filter
+ * indexes should only be added on relevant trees (uid for people, etc)
+ * then clean the result set of any entries without the right base */
 char *
-make_map(const char *filter, char *base)
+make_map(const char *filter, char *base, char *index, char *index_value)
 {
-	char *json;
+	char *json, *index_bin;
 	json_t *job, *inputs, *query, *map, *key_filters, *key, *o, *t;
 	
 	inputs = json_object();
@@ -337,11 +340,14 @@ make_map(const char *filter, char *base)
 	key = json_array();
 	t = json_array();
 
-	json_array_append_new(t, json_string("to_lower"));
-	json_array_append(key_filters, t);
-	json_array_append_new(key, json_string("starts_with"));
-	json_array_append_new(key, json_string(reverse_dn(base)));
-	json_array_append(key_filters, key);
+	if (!index) {
+		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "using base\n");
+		json_array_append_new(t, json_string("to_lower"));
+		json_array_append(key_filters, t);
+		json_array_append_new(key, json_string("starts_with"));
+		json_array_append_new(key, json_string(reverse_dn(base)));
+		json_array_append(key_filters, key);
+	}
 
 	json_object_set_new(map, "language", json_string("javascript"));
 	json_object_set_new(map, "bucket", json_string("code"));
@@ -353,13 +359,21 @@ make_map(const char *filter, char *base)
 	json_array_append(query, o);
 
 	json_object_set_new(inputs, "bucket", json_string("ldap"));
-	json_object_set(inputs, "key_filters", key_filters);
+
+	if (!index)
+		json_object_set(inputs, "key_filters", key_filters);
+	else {
+		index_bin = malloc(strlen(index) + 5);
+		snprintf(index_bin, strlen(index) + 5, "%s_bin", index);
+		json_object_set(inputs, "index", json_string(index_bin));
+		json_object_set(inputs, "key", json_string(index_value));
+	}
 
 	json_object_set(job, "inputs", inputs);
 	json_object_set(job, "query", query);
 
 	json = json_dumps(job, JSON_INDENT(4));
-
+	slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "job: %s\n", json);
 	return json;
 }
 
@@ -545,14 +559,64 @@ riak_back_mod(Slapi_PBlock *pb)
 	return 0;
 }
 
+
+void
+filter_attrs(const struct slapi_filter *f, char **index, char **index_value) {
+	char *i = NULL, *v = NULL;
+	struct slapi_filter *p;
+
+	if (f == NULL)
+		return;
+
+	switch (f->f_choice) {
+	case LDAP_FILTER_EQUALITY:
+	case LDAP_FILTER_GE:
+	case LDAP_FILTER_LE:
+	case LDAP_FILTER_APPROX:
+		/* slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "attr: %s\n", f->f_ava.ava_type); */
+		if (is_index(f->f_ava.ava_type)) {
+			i = f->f_ava.ava_type;
+			v = f->f_ava.ava_value.bv_val;
+		}
+		break;
+	case LDAP_FILTER_PRESENT:
+		/* slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "pres: %s\n", f->f_type); */
+		if (is_index(f->f_type)) {
+			i = f->f_type;
+			v = "*";
+		}
+		break;
+	case LDAP_FILTER_AND:
+	case LDAP_FILTER_OR:
+		for (p = f->f_list; p != NULL; p = p->f_next)
+			filter_attrs(p, index, index_value);
+		break;
+	default:
+		break;
+	}
+
+	if (i && v) {
+		if (*index)
+			free(*index);
+		*index = strdup(i);
+
+		if (*index_value)
+			free(*index_value);
+		*index_value = strdup(v);
+	}
+}
+
 int
 riak_back_search(Slapi_PBlock *pb)
 {
 	int scope;
+	char *q, *r, *filter, *index_value = NULL, *index = NULL, *base = NULL;
 	Slapi_Operation *op;
-	char *q, *r, *filter, *base = NULL;
 
+	struct slapi_filter *f;
+	
 	if (slapi_pblock_get(pb, SLAPI_OPERATION, &op) ||
+	    slapi_pblock_get(pb, SLAPI_SEARCH_FILTER, &f) ||
 	    slapi_pblock_get(pb, SLAPI_SEARCH_STRFILTER, &filter) ||
 	    slapi_pblock_get(pb, SLAPI_SEARCH_SCOPE, &scope) ||
 	    slapi_pblock_get(pb, SLAPI_SEARCH_TARGET, &base)) {
@@ -565,7 +629,9 @@ riak_back_search(Slapi_PBlock *pb)
 		return 0;
 	}
 
-	q = make_map(filter, base);
+	filter_attrs(f, &index, &index_value);
+	q = make_map(filter, base, index, index_value);
+
 	if (!(r = mapreduce(q))) {
 		slapi_send_ldap_result(pb, LDAP_NO_SUCH_OBJECT, NULL, NULL, 0, NULL);
 		return 0;
