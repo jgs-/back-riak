@@ -108,3 +108,11 @@ struct slapi_filter {
 	struct slapi_filter     *f_next;
 };
 
+struct slapi_dn
+{
+	unsigned char flag;
+	const char *udn;
+	const char *dn;
+	const char *ndn;
+	int ndn_len;
+};

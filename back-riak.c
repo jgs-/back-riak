@@ -84,6 +84,15 @@ reverse_dn(char *i)
 	return p;
 }
 
+void
+normalize_dn(char *s)
+{
+	int i;
+	
+	for (i = 0; s[i] != '\0'; i++)
+		s[i] = tolower(s[i]);
+}
+
 static size_t
 write_callback(void *contents, size_t size, size_t nmemb, void *p)
 {
@@ -432,9 +441,9 @@ json2entry(const char *key, json_t *j)
 }
 
 int
-parse_search_results(Slapi_PBlock *pb, char *blob)
+parse_search_results(Slapi_PBlock *pb, char *blob, char *base)
 {
-	char **attrs;
+	char **attrs, *dn, *b, *t;
 	int attrsonly;
 	size_t i, n;
 	const char *key;
@@ -454,7 +463,24 @@ parse_search_results(Slapi_PBlock *pb, char *blob)
 			continue;
 
 		e = json2entry(json_string_value(json_array_get(r, 0)), data);
-		slapi_send_ldap_search_entry(pb, e, NULL, attrs, attrsonly);
+
+		/* reverse the dns */
+		t = strdup(slapi_entry_get_dn(e));
+		dn = reverse_dn(t);
+		free(t);
+
+		t = strdup(base);	
+		b = reverse_dn(t);
+		free(t);
+
+		/* normalize them */
+		normalize_dn(dn);
+		normalize_dn(b);
+
+		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "comparing: %s - %s\n", dn, b);
+
+		if (!strncmp(dn, b, strlen(b)))
+			slapi_send_ldap_search_entry(pb, e, NULL, attrs, attrsonly);
 	}
 
 	return i;
@@ -637,7 +663,7 @@ riak_back_search(Slapi_PBlock *pb)
 		return 0;
 	}
 
-	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, parse_search_results(pb, r), NULL);
+	slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, parse_search_results(pb, r, base), NULL);
 	return 0;
 }
 
