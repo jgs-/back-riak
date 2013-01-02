@@ -331,9 +331,23 @@ mapreduce(char *job) {
 	return retr.mem;
 }
 
+int
+is_substring(char *s)
+{
+	int i;
+
+	for (i = 0; s[i] != '\0'; i++) {
+		if (s[i] == '*')
+			return i;
+	}
+	
+	return -1;
+}
+
 char *
 make_map(const char *filter, char *base, char *index, char *index_value)
 {
+	int i;
 	char *json, *index_bin;
 	json_t *job, *inputs, *query, *map, *key_filters, *key, *o, *t;
 	
@@ -376,6 +390,12 @@ make_map(const char *filter, char *base, char *index, char *index_value)
 		if (index_value[0] == '*') {
 			json_object_set(inputs, "start", json_string("A"));
 			json_object_set(inputs, "end", json_string("z"));
+		} else if ((i = is_substring(index_value)) >= 0) {	
+			index_value[i] = 'A';
+			json_object_set(inputs, "start", json_string(index_value));
+			index_value[i] = 'z';
+			json_object_set(inputs, "end", json_string(index_value));
+			index_value[i] = '*';
 		} else
 			json_object_set(inputs, "key", json_string(index_value));
 	}
