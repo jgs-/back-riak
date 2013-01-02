@@ -331,9 +331,6 @@ mapreduce(char *job) {
 	return retr.mem;
 }
 
-/* TODO if index, use index, otherwise use key_filter
- * indexes should only be added on relevant trees (uid for people, etc)
- * then clean the result set of any entries without the right base */
 char *
 make_map(const char *filter, char *base, char *index, char *index_value)
 {
@@ -375,7 +372,12 @@ make_map(const char *filter, char *base, char *index, char *index_value)
 		index_bin = malloc(strlen(index) + 5);
 		snprintf(index_bin, strlen(index) + 5, "%s_bin", index);
 		json_object_set(inputs, "index", json_string(index_bin));
-		json_object_set(inputs, "key", json_string(index_value));
+
+		if (index_value[0] == '*') {
+			json_object_set(inputs, "start", json_string("A"));
+			json_object_set(inputs, "end", json_string("z"));
+		} else
+			json_object_set(inputs, "key", json_string(index_value));
 	}
 
 	json_object_set(job, "inputs", inputs);
@@ -452,6 +454,12 @@ parse_search_results(Slapi_PBlock *pb, char *blob, char *base)
 
 	slapi_pblock_get(pb, SLAPI_SEARCH_ATTRS, &attrs);
 	slapi_pblock_get(pb, SLAPI_SEARCH_ATTRSONLY, &attrsonly);
+
+	/* reverse the base dn */
+	t = strdup(base);
+	b = reverse_dn(t);
+	normalize_dn(b);
+	free(t);
 	
 	if (!(results = json_loads(blob, 0, NULL)) || !(n = json_array_size(results)))
 		return 0;
@@ -468,16 +476,7 @@ parse_search_results(Slapi_PBlock *pb, char *blob, char *base)
 		t = strdup(slapi_entry_get_dn(e));
 		dn = reverse_dn(t);
 		free(t);
-
-		t = strdup(base);	
-		b = reverse_dn(t);
-		free(t);
-
-		/* normalize them */
 		normalize_dn(dn);
-		normalize_dn(b);
-
-		slapi_log_error(SLAPI_LOG_PLUGIN, "riak-backend", "comparing: %s - %s\n", dn, b);
 
 		if (!strncmp(dn, b, strlen(b)))
 			slapi_send_ldap_search_entry(pb, e, NULL, attrs, attrsonly);
