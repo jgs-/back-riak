@@ -298,6 +298,43 @@ riak_put(const char *key, const char *data, const char *vclock) {
 	return -1;
 }
 
+int
+riak_del(const char *key)
+{
+	char *dn, *url;
+	size_t l;
+
+	CURL *h;
+	CURLcode res;
+
+	curl_global_init(CURL_GLOBAL_ALL);
+	if (!(h = curl_easy_init()))
+		return -1;
+
+	dn = strdup(key);
+	convert_space(dn);
+
+	l = strlen(dn) + strlen(RIAK_URL) + 1;
+	if (!(url = malloc(l))) {
+		curl_easy_cleanup(h);
+		return -1;
+	}
+	snprintf(url, l, "%s%s", RIAK_URL, dn);
+
+	curl_easy_setopt(h, CURLOPT_CUSTOMREQUEST, "DELETE");
+	curl_easy_setopt(h, CURLOPT_URL, url);
+
+	res = curl_easy_perform(h);
+	curl_easy_cleanup(h);
+	free(dn);
+	free(url);
+
+	if (res == CURLE_OK)
+		return 0;
+
+	return -1;
+}
+
 char *
 mapreduce(char *job) {
 	struct chunk retr;
@@ -604,6 +641,22 @@ riak_back_mod(Slapi_PBlock *pb)
 	return 0;
 }
 
+int
+riak_back_del(Slapi_PBlock *pb)
+{
+	char *dn;
+
+	if (slapi_pblock_get(pb, SLAPI_DELETE_TARGET, &dn))
+		return (-1);
+
+	dn = reverse_dn(dn);
+	if (riak_del(dn))
+		slapi_send_ldap_result(pb, LDAP_NO_SUCH_OBJECT, NULL, NULL, 0, NULL);
+	else
+		slapi_send_ldap_result(pb, LDAP_SUCCESS, NULL, NULL, 0, NULL);
+
+	return 0;
+}
 
 void
 filter_attrs(const struct slapi_filter *f, char **index, char **index_value) {
@@ -699,6 +752,7 @@ riak_back_init(Slapi_PBlock *pb)
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_VERSION, SLAPI_PLUGIN_VERSION_01) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_SEARCH_FN, (void *)&riak_back_search) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_ADD_FN, (void *)&riak_back_add) ||
+	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_DELETE_FN, (void *)&riak_back_del) ||
 	    slapi_pblock_set(pb, SLAPI_PLUGIN_PRE_MODIFY_FN, (void *)&riak_back_mod)) {
 		slapi_log_error(SLAPI_LOG_FATAL, "riak-backend", "Couldn't setup functions\n");
 		return -1;
